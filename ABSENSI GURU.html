@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <title>SDN TANJUNGSARI I - Absensi Guru</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    h1 {
+      text-align: center;
+    }
+    #absenTable {
+      border-collapse: collapse;
+      width: 100%;
+      margin-top: 20px;
+    }
+    #absenTable th, #absenTable td {
+      border: 1px solid #ccc;
+      text-align: center;
+      width: 30px;
+      height: 30px;
+    }
+    #absenTable .libur {
+      background-color: #eee;
+    }
+    canvas {
+      border: 1px solid #000;
+    }
+    .rekap-btn {
+      margin-top: 10px;
+    }
+    #judulRekap {
+      text-align: center;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <h1>SDN TANJUNGSARI I</h1>
+  <h3 id="bulanSekarang"></h3>
+
+  <div>
+    <input type="text" id="namaGuru" placeholder="Ketik nama guru">
+    <input type="text" id="nipGuru" placeholder="NIP">
+    <button onclick="tambahGuru()">Tambah Guru</button>
+  </div>
+
+  <div>
+    <label for="dropdownGuru">Pilih Guru:</label>
+    <select id="dropdownGuru"></select>
+  </div>
+
+  <div>
+    <canvas id="kanvasParaf" width="100" height="50"></canvas><br>
+    <button onclick="simpanParaf()">Simpan Paraf Hari Ini</button>
+    <button onclick="clearCanvas()">Clear</button>
+  </div>
+
+  <div id="judulRekap">
+    <h2>ABSENSI GURU SD NEGERI TANJUNGSARI I</h2>
+    <h3 id="bulanTahunRekap"></h3>
+  </div>
+
+  <div id="tabelAbsensi"></div>
+
+  <div class="rekap-btn">
+    <button onclick="downloadExcel()">Rekap Excel</button>
+    <button onclick="downloadPDF()">Rekap PDF</button>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <script>
+    const WEEKEND = [0]; // 0 = Minggu
+    const guruList = new Map(); // Map nama -> NIP
+    const parafData = new Map(); // Map nama -> Map(tanggal -> dataURL)
+
+    function getTanggalHariIni() {
+      const tgl = new Date();
+      return tgl.getDate();
+    }
+
+    function getBulanSekarang() {
+      const bulan = new Date().toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+      document.getElementById('bulanSekarang').innerText = bulan;
+      document.getElementById('bulanTahunRekap').innerText = bulan;
+      return new Date();
+    }
+
+    function tambahGuru() {
+      const nama = document.getElementById('namaGuru').value.trim();
+      const nip = document.getElementById('nipGuru').value.trim();
+      if (!nama || guruList.has(nama)) return alert("Nama kosong atau sudah ada.");
+      guruList.set(nama, nip);
+      parafData.set(nama, new Map());
+      const dropdown = document.getElementById('dropdownGuru');
+      const opt = document.createElement('option');
+      opt.value = opt.text = nama;
+      dropdown.add(opt);
+      renderTabel();
+    }
+
+    function renderTabel() {
+      const div = document.getElementById('tabelAbsensi');
+      const hari = new Date();
+      const tahun = hari.getFullYear();
+      const bulan = hari.getMonth();
+      const totalHari = new Date(tahun, bulan + 1, 0).getDate();
+
+      let html = '<table id="absenTable"><tr><th>Nama</th>';
+      for (let i = 1; i <= totalHari; i++) {
+        const d = new Date(tahun, bulan, i);
+        const isWeekend = WEEKEND.includes(d.getDay());
+        html += `<th class="${isWeekend ? 'libur' : ''}">${i}</th>`;
+      }
+      html += '</tr>';
+
+      guruList.forEach((nip, nama) => {
+        html += `<tr><td>${nama}<br><small>${nip}</small></td>`;
+        const dataParaf = parafData.get(nama);
+        for (let i = 1; i <= totalHari; i++) {
+          const d = new Date(tahun, bulan, i);
+          const isWeekend = WEEKEND.includes(d.getDay());
+          const paraf = dataParaf.get(i);
+          html += `<td class="${isWeekend ? 'libur' : ''}">${paraf ? `<img src="${paraf}" height="15">` : ''}</td>`;
+        }
+        html += '</tr>';
+      });
+      html += '</table>';
+      div.innerHTML = html;
+    }
+
+    function simpanParaf() {
+      const nama = document.getElementById('dropdownGuru').value;
+      if (!nama) return alert("Pilih guru dulu.");
+      const tgl = getTanggalHariIni();
+      const canvas = document.getElementById('kanvasParaf');
+      const url = canvas.toDataURL();
+      parafData.get(nama).set(tgl, url);
+      renderTabel();
+    }
+
+    function clearCanvas() {
+      const canvas = document.getElementById('kanvasParaf');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // gambar di canvas
+    const canvas = document.getElementById('kanvasParaf');
+    const ctx = canvas.getContext('2d');
+    let drawing = false;
+
+    canvas.addEventListener('mousedown', () => drawing = true);
+    canvas.addEventListener('mouseup', () => drawing = false);
+    canvas.addEventListener('mousemove', e => {
+      if (!drawing) return;
+      const rect = canvas.getBoundingClientRect();
+      ctx.lineWidth = 2;
+      ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+      ctx.stroke();
+    });
+
+    async function downloadPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      const container = document.createElement('div');
+      container.style.padding = '10px';
+      container.innerHTML = document.getElementById("judulRekap").outerHTML + document.getElementById("tabelAbsensi").outerHTML;
+
+      document.body.appendChild(container);
+      await html2canvas(container).then(canvas => {
+        const imgData = canvas.toDataURL("image/png");
+        doc.addImage(imgData, 'PNG', 10, 10, 190, 0);
+        doc.save("rekap-absen.pdf");
+        document.body.removeChild(container);
+      });
+    }
+
+    function downloadExcel() {
+      const wb = XLSX.utils.book_new();
+      const bulan = new Date().toLocaleString('id-ID', { month: 'long', year: 'numeric' });
+      const ws_data = [
+        ["ABSENSI GURU SD NEGERI TANJUNGSARI I"],
+        [bulan],
+        [],
+        ["Nama/NIP"]
+      ];
+      const hari = new Date();
+      const totalHari = new Date(hari.getFullYear(), hari.getMonth() + 1, 0).getDate();
+      for (let i = 1; i <= totalHari; i++) ws_data[3].push(i);
+
+      guruList.forEach((nip, nama) => {
+        const row = [`${nama}\n${nip}`];
+        const dataParaf = parafData.get(nama);
+        for (let i = 1; i <= totalHari; i++) {
+          row.push(dataParaf.get(i) ? `=IMAGE("${dataParaf.get(i)}")` : "");
+        }
+        ws_data.push(row);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+      XLSX.utils.book_append_sheet(wb, ws, "Absensi");
+      XLSX.writeFile(wb, "rekap-absen.xlsx");
+    }
+
+    getBulanSekarang();
+  </script>
+</body>
+</html>
